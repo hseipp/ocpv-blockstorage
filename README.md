@@ -11,23 +11,43 @@ The purpose of this project is to provide tools to improve usage of IBM Block St
 <!-- A more detailed Usage or detailed explaination of the repository here -->
 ## Usage
 
-This repository contains some example best practices for open source repositories:
+The [script](src/vm_rwo_to_rwx.sh) provided with this repository changes the
+access mode of Block Storage volumes used by OpenShift Virtualization virtual
+machines from RearWriteOnce (RWO) to ReadWriteMany (RWX).
 
-* [LICENSE](LICENSE)
-* [README.md](README.md)
-* [CONTRIBUTING.md](CONTRIBUTING.md)
-* [MAINTAINERS.md](MAINTAINERS.md)
-<!-- A Changelog allows you to track major changes and things that happen, https://github.com/github-changelog-generator/github-changelog-generator can help automate the process -->
-* [CHANGELOG.md](CHANGELOG.md)
-<!-- The following are OPTIONAL, but strongly suggested to have in your repository. -->
-* [dco.yml](.github/dco.yml) - This enables DCO bot for you, please take a look [https://github.com/probot/dco](https://github.com/probot/dco) for more details.
+Before using that script, double-check that your Block Storage CSI driver
+supports RWX Block access mode. [IBM Block Storage CSI 1.12.0](https://www.ibm.com/docs/en/stg-block-csi-driver/1.12.0) and later
+versions provide support for RWX Block access mode.
 
-These may be copied into a new or existing project to make it easier for developers not on a project team to collaborate.
 
-<!-- A notes section is useful for anything that isn't covered in the Usage or Scope. Like what we have below. -->
+To achieve that, all CRs for the given VM that are
+
+- VirtualMachine
+- DataVolume
+- PersistentVolumeClaim(s)
+- PersistentVolume(s)
+
+will be modified to ReadWriteMany access mode.
+
+Before using the script, please check the contents and modify the `NAMESPACE`
+and `VM` variables according to your needs.
+Please ensure that the source PVC used to create the VM is still present:
+
+```shell
+oc get pvc -n openshift-virtualization-os-images $(oc get dv $VM -o jsonpath='{.spec.source.pvc.name}')
+```
+
+(Replace `$VM` with the name of your VM.)
+
+It is highly recommended to save the above mentioned CRs before using the
+script as these get deleted by the script before they get re-created.
+
+## Disclaimer
+
+Please note: This project is released for use "AS IS" without any warranties of any kind, including, but not limited to installation, use, or performance of the resources in this repository. We are not responsible for any damage, data loss or charges incurred with their use. This project is outside the scope of the IBM PMR process. If you have any issues, questions or suggestions you can create a new [issue here](issues). Issues will be addressed as team availability permits.
+
 ## Notes
 
-<!-- Questions can be useful but optional, this gives you a place to say, "This is how to contact this project maintainers or create PRs -->
 If you have any questions or issues you can create a new [issue here](issues).
 
 Pull requests are very welcome! Make sure your patches are well tested.
@@ -39,6 +59,8 @@ example:
 3. Commit your changes (`git commit -am 'Added some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
 5. Create new Pull Request
+
+See [Contributing](CONTRIBUTING.md) for additional details on contributions.
 
 ## License
 

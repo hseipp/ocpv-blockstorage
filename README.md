@@ -19,7 +19,6 @@ Before using that script, double-check that your Block Storage CSI driver
 supports RWX Block access mode. [IBM Block Storage CSI 1.12.0](https://www.ibm.com/docs/en/stg-block-csi-driver/1.12.0) and later
 versions provide support for RWX Block access mode.
 
-
 To achieve that, all CRs for the given VM that are
 
 - VirtualMachine
@@ -41,6 +40,11 @@ oc get pvc -n openshift-virtualization-os-images $(oc get dv $VM -o jsonpath='{.
 
 It is highly recommended to save the above mentioned CRs before using the
 script as these get deleted by the script before they get re-created.
+
+[!WARNING]
+The script currently does not handle advanced VM creation and storage addition options. For example, a VM restored from a snapshot might contain PVCs without a DataVolume that will not be preserved. Support for that is subject to a future update of this script.
+Also the script currently does not handle expiry of the original template PVCs the VMs got cloned from. If the source PVC got deleted,
+the re-creation of the DataVolume will fail. A fix for that is being validated and will be part of a future version of this script.
 
 ## Disclaimer
 

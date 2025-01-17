@@ -1,3 +1,3 @@
 # MAINTAINERS
 
-Harald Seipp - [seipp@de.ibm.com](seipp@de.ibm.com)
+Harald Seipp - seipp at de dot ibm dot com

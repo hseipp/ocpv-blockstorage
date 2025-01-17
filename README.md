@@ -41,8 +41,7 @@ oc get pvc -n openshift-virtualization-os-images $(oc get dv $VM -o jsonpath='{.
 It is highly recommended to save the above mentioned CRs before using the
 script as these get deleted by the script before they get re-created.
 
-[!WARNING]
-The script currently does not handle advanced VM creation and storage addition options. For example, a VM restored from a snapshot might contain PVCs without a DataVolume that will not be preserved. Support for that is subject to a future update of this script.
+:exclamation: *WARNING* The script currently does not handle advanced VM creation and storage addition options. For example, a VM restored from a snapshot might contain PVCs without a DataVolume that will not be preserved. Support for that is subject to a future update of this script.
 Also the script currently does not handle expiry of the original template PVCs the VMs got cloned from. If the source PVC got deleted,
 the re-creation of the DataVolume will fail. A fix for that is being validated and will be part of a future version of this script.
 

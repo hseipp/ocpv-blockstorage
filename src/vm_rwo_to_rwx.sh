@@ -150,9 +150,11 @@ PVCS=()
 RECLAIMPOLICIES=()
 for DV in $DATAVOLUMES; do
     PVC=$(oc get dv $DV -o jsonpath='{.status.claimName}')
+    oc get pvc $PVC -o json > pvc_${PVC}_old.json
     PVCS+=($PVC)
     # Retrieve PV for PVC
     PV=$(oc get pvc $PVC -o jsonpath='{.spec.volumeName}')
+    oc get pv $PV -o json > pv_${PV}_old.json
     PVS+=($PV)
     # Get original reclaim policy
     RECLAIMPOLICIES+=($(oc get pv $PV -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'))

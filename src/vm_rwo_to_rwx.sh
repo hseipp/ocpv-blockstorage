@@ -125,13 +125,13 @@ EOF
 EOF
 
     # jq filter, third step: patch old OS image PVC name, if applicable
-    OS_PVC_NAME=$(oc get dv "$DV" -o json | jq -r '.spec.source.pvc.name')
+    OS_PVC_NAME=$(oc get dv "$DV" -o jsonpath='{.spec.source.pvc.name}')
     if [ -n "$OS_PVC_NAME" ]; then
-    echo "OS image PVC name found: $OS_PVC_NAME"
-    OS_FLAVOUR=$(echo $OS_PVC_NAME | awk -F'-' '{print $1}')
-    NEW_OS_PVC_NAME=$(oc get pvc -n openshift-virtualization-os-images | grep $OS_FLAVOUR | sort -k7,7 | head -n 1 | awk '{print $1}')
-    echo "will patch with latest $OS_FLAVOUR PVC $NEW_OS_PVC_NAME to avoid errors"
-    cat <<EOF>>jq_filter_dv_$DV
+        echo "OS image PVC name found: $OS_PVC_NAME"
+        OS_FLAVOUR=$(echo $OS_PVC_NAME | awk -F'-' '{print $1}')
+        NEW_OS_PVC_NAME=$(oc get pvc -n openshift-virtualization-os-images | grep $OS_FLAVOUR | sort -n -k8,8 | tail -n 1 | awk '{print $1}')
+        echo "will patch with latest $OS_FLAVOUR PVC $NEW_OS_PVC_NAME to avoid errors"
+        cat <<EOF>>jq_filter_dv_$DV
 | .spec.source.pvc.name = "${NEW_OS_PVC_NAME}"
 EOF
     else

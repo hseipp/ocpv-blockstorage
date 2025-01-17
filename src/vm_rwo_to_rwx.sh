@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Copyright 2024- IBM Inc. All rights reserved
 # SPDX-License-Identifier: MIT
@@ -8,12 +8,40 @@
 # For debugging, uncomment the following line
 #set -x
 
-# --- ADJUST THESE VARIABLES ACCORDING TO YOUR NEEDS
-# Original VM name, this VM needs to exist
-VM="rhel9-rwo"
+# Function to display usage
+usage() {
+  echo "Usage: $0 -h vm_name"
+  echo "  -h: VM name"
+  echo "Examples: "
+  echo "vm_rwo_to_rwx.sh -h nr-tinytool-test-01"
+  echo "vm_rwo_to_rwx.sh -h nr-build-01"
+  exit 1
+}
+
+# Parse input arguments
+while getopts "h:" opt; do
+  case $opt in
+    h) VM=$OPTARG ;;
+    *) usage ;;
+  esac
+done
+
+# Check if all arguments are provided
+if [ -z "$VM" ]; then
+  usage
+fi
+
+# Redirect all output to tee and log to a file
+exec > >(tee -a vm_rwo_to_rwx-${VM}.log) 2>&1
+
+echo "ATTENTION: this is a script provided by IBM that will delete the VM, DataVolume and PVC CRs for $VM"
+echo "WARNING: Proceeding may have consequences."
+echo "Press any key to continue or Ctrl+C to exit."
+read -n 1 -s -r
+echo "Continuing..."
+
 # The namespace needs to exist
 NAMESPACE="rwo-to-rwx"
-# ---
 
 # Check for prereqs: oc CLI, jq installed
 which oc
@@ -42,6 +70,19 @@ if [ $? -eq 1 ]; then
     exit 1
 fi
 
+# Check the VM status
+VM_STATUS=$(oc get vm "$VM" -n "$NAMESPACE" -o jsonpath='{.status.printableStatus}')
+
+# Check if the VM is not in the "Stopped" state
+if [[ "$VM_STATUS" != "Stopped" ]]; then
+  echo "WARNING: VM '$VM' is in state '$VM_STATUS'."
+  echo "The VM must be in a 'Stopped' state to proceed. Exiting."
+  exit 1
+fi
+
+# Proceed with the rest of the script
+echo "VM '$VM' is in 'Stopped' state. Proceeding..."
+
 # Get all relevant data volumes for the VM
 DATAVOLUMES=$(oc get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].dataVolume}' | jq -r .name)
 
@@ -62,7 +103,13 @@ EOF
     ((i++))
 done
 
+# jq filter, third step: deletion of macAddress from all interfaces
+cat <<EOF>>jq_filter_vm
+| (.spec.template.spec.domain.devices.interfaces[] |= del(.macAddress))
+EOF
+
 # Get VM definition, clean up entries and patch new access mode
+oc get vm $VM -o json > vm_${VM}_old.json
 oc get vm $VM -o json | jq -f jq_filter_vm > vm_${VM}_new.json
 
 for DV in $DATAVOLUMES; do
@@ -76,10 +123,25 @@ EOF
     cat <<EOF>>jq_filter_dv_$DV
 | .spec.storage.accessModes[0] = "ReadWriteMany"
 EOF
+
+    # jq filter, third step: patch old OS image PVC name, if applicable
+    OS_PVC_NAME=$(oc get dv "$DV" -o json | jq -r '.spec.source.pvc.name')
+    if [ -n "$OS_PVC_NAME" ]; then
+    echo "OS image PVC name found: $OS_PVC_NAME"
+    OS_FLAVOUR=$(echo $OS_PVC_NAME | awk -F'-' '{print $1}')
+    NEW_OS_PVC_NAME=$(oc get pvc -n openshift-virtualization-os-images | grep $OS_FLAVOUR | sort -k7,7 | head -n 1 | awk '{print $1}')
+    echo "will patch with latest $OS_FLAVOUR PVC $NEW_OS_PVC_NAME to avoid errors"
+    cat <<EOF>>jq_filter_dv_$DV
+| .spec.source.pvc.name = "${NEW_OS_PVC_NAME}"
+EOF
+    else
+        echo "No OS image PVC name found in DataVolume: $DV"
+    fi
 done
 
 # Get DataVolume definition, clean up entries and patch new name and access mode
 for DV in $DATAVOLUMES; do
+    oc get dv $DV -o json > dv_${DV}_old.json
     oc get dv $DV -o json | jq -f jq_filter_dv_$DV > dv_${DV}_new.json
 done
 

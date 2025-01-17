@@ -19,7 +19,7 @@ Before using that script, double-check that your Block Storage CSI driver
 supports RWX Block access mode. [IBM Block Storage CSI 1.12.0](https://www.ibm.com/docs/en/stg-block-csi-driver/1.12.0) and later
 versions provide support for RWX Block access mode.
 
-To achieve that, all CRs for the given VM that are
+To convert the VM to use RWX Block access mode, all CRs for the given VM that are
 
 - VirtualMachine
 - DataVolume
@@ -29,21 +29,28 @@ To achieve that, all CRs for the given VM that are
 will be modified to ReadWriteMany access mode.
 
 Before using the script, please check the contents and modify the `NAMESPACE`
-and `VM` variables according to your needs.
-Please ensure that the source PVC used to create the VM is still present:
+variable according to your needs.
+
+The source PVC used to create the VM migfht be no longer present - check with:
 
 ```shell
 oc get pvc -n openshift-virtualization-os-images $(oc get dv $VM -o jsonpath='{.spec.source.pvc.name}')
 ```
 
 (Replace `$VM` with the name of your VM.)
+In that case, the script with pick the oldest available source PVC that matches the template pattern of the original source PVC.
+
 
 It is highly recommended to save the above mentioned CRs before using the
 script as these get deleted by the script before they get re-created.
 
 :exclamation: *WARNING* The script currently does not handle advanced VM creation and storage addition options. For example, a VM restored from a snapshot might contain PVCs without a DataVolume that will not be preserved. Support for that is subject to a future update of this script.
-Also the script currently does not handle expiry of the original template PVCs the VMs got cloned from. If the source PVC got deleted,
-the re-creation of the DataVolume will fail. A fix for that is being validated and will be part of a future version of this script.
+
+if all the prereqs are met, you can convert your VM to RWX access mode by specifying the VM name as parameter to the script:
+
+```shell
+./vw_rwo_to_rwx.sh -h my_vm
+```
 
 ## Disclaimer
 

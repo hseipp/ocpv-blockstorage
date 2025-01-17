@@ -83,6 +83,18 @@ fi
 # Proceed with the rest of the script
 echo "VM '$VM' is in 'Stopped' state. Proceeding..."
 
+# Check if VM definition contains PVC instead of DataVolume
+# Seems to be used by earlier OCP-V versions after performing VM restores from snapshots.
+# Current OCP-V releases seem to always use DataVolumes.
+PVCS=$(get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim}')
+if [ -n "$PVCS" ]; then
+    echo "Your VM definition contains PVC without a DataVolume. This is not supported with this script."
+    echo "You need to manually patch the PV to ReclaimPolicy Retain, save the PVC definition, then"
+    echo "follow the flow of this script. After deleting the VM, patch the PVC definition to RWX access"
+    echo "mode and re-create the PVC, then follow the flow of rest of this script. Exiting"
+    exit 1
+fi
+
 # Get all relevant data volumes for the VM
 DATAVOLUMES=$(oc get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].dataVolume}' | jq -r .name)
 
@@ -97,7 +109,7 @@ EOF
 # jq filter, second step: patch all Datavolume entries to RWX
 i=0
 for DV in $DATAVOLUMES; do
-cat <<EOF>>jq_filter_vm
+    cat <<EOF>>jq_filter_vm
 | .spec.dataVolumeTemplates[$i].spec.storage.accessModes[0] = "ReadWriteMany"
 EOF
     ((i++))

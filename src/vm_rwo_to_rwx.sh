@@ -86,7 +86,7 @@ echo "VM '$VM' is in 'Stopped' state. Proceeding..."
 # Check if VM definition contains PVC instead of DataVolume
 # Seems to be used by earlier OCP-V versions after performing VM restores from snapshots.
 # Current OCP-V releases seem to always use DataVolumes.
-PVCS=$(get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim}')
+PVCS=$(oc get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim}')
 if [ -n "$PVCS" ]; then
     echo "Your VM definition contains PVC without a DataVolume. This is not supported with this script."
     echo "You need to manually patch the PV to ReclaimPolicy Retain, save the PVC definition, then"

@@ -58,8 +58,8 @@ fi
 wait_for_pvc_bound() {
     PHASE=$(oc get pvc $1 -o 'jsonpath={.status.phase}')
     while [ "$PHASE" != "Bound" ]; do
-	sleep 1
-	PHASE=$(oc get pvc $1 -o 'jsonpath={.status.phase}')
+        sleep 1
+        PHASE=$(oc get pvc $1 -o 'jsonpath={.status.phase}')
     done
 }
 
@@ -83,22 +83,14 @@ fi
 # Proceed with the rest of the script
 echo "VM '$VM' is in 'Stopped' state. Proceeding..."
 
-# Check if VM definition contains PVC instead of DataVolume
-# Seems to be used by earlier OCP-V versions after performing VM restores from snapshots.
-# Current OCP-V releases seem to always use DataVolumes.
-PVCS=$(oc get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim}')
-if [ -n "$PVCS" ]; then
-    echo "Your VM definition contains PVC without a DataVolume. This is not supported with this script."
-    echo "You need to manually patch the PV to ReclaimPolicy Retain, save the PVC definition, then"
-    echo "follow the flow of this script. After deleting the VM, patch the PVC definition to RWX access"
-    echo "mode and re-create the PVC, then follow the flow of rest of this script. Exiting"
-    exit 1
-fi
-
 # Get all relevant data volumes for the VM
 DATAVOLUMES=$(oc get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].dataVolume}' | jq -r .name)
 
-# Build jq filter - cleanup
+# VMs that got disks added online (hotplug) and afterwards were restored from a snapshot,
+# might contain PVCs instead of DataVolumes. Capture these as well
+ONLINEPVCS=$(oc get vm $VM -o jsonpath='{.spec.template.spec.volumes[*].persistentVolumeClaim}' | jq -r .claimName)
+
+# Build jq filter - cleanup VM definition
 cat <<EOF>jq_filter_vm
 del(.status, .metadata.annotations, .metadata.creationTimestamp,
 .metadata.finalizers, .metadata.generation, .metadata.uid,
@@ -140,12 +132,18 @@ EOF
     OS_PVC_NAME=$(oc get dv "$DV" -o jsonpath='{.spec.source.pvc.name}')
     if [ -n "$OS_PVC_NAME" ]; then
         echo "OS image PVC name found: $OS_PVC_NAME"
-        OS_FLAVOUR=$(echo $OS_PVC_NAME | awk -F'-' '{print $1}')
-        NEW_OS_PVC_NAME=$(oc get pvc -n openshift-virtualization-os-images | grep $OS_FLAVOUR | sort -n -k8,8 | tail -n 1 | awk '{print $1}')
-        echo "will patch with latest $OS_FLAVOUR PVC $NEW_OS_PVC_NAME to avoid errors"
-        cat <<EOF>>jq_filter_dv_$DV
+        OS_PVC_EXISTS=$(oc get pvc -n openshift-virtualization-os-images $OS_PVC_NAME -o name)
+        if [ $? = 0 ]; then
+            echo "OS image PVC exists: $OS_PVC_EXISTS"
+        else
+            echo "OS image PVC does no longer exist"
+            OS_FLAVOUR=$(echo $OS_PVC_NAME | awk -F'-' '{print $1}')
+            NEW_OS_PVC_NAME=$(oc get pvc -n openshift-virtualization-os-images | grep $OS_FLAVOUR | sort -n -k8,8 | tail -n 1 | awk '{print $1}')
+            echo "Patching with latest $OS_FLAVOUR PVC $NEW_OS_PVC_NAME to avoid errors"
+            cat <<EOF>>jq_filter_dv_$DV
 | .spec.source.pvc.name = "${NEW_OS_PVC_NAME}"
 EOF
+        fi
     else
         echo "No OS image PVC name found in DataVolume: $DV"
     fi
@@ -170,37 +168,71 @@ for DV in $DATAVOLUMES; do
     PVS+=($PV)
     # Get original reclaim policy
     RECLAIMPOLICIES+=($(oc get pv $PV -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'))
-
+    echo "Patching DataVolume PVs to Retain mode"
     # Ensure that the PV will be retained after PVC deletion
     oc patch pv $PV --type=merge -p '{"spec": {"persistentVolumeReclaimPolicy": "Retain"}}'
 done
 
+# Build jq filter - cleanup PVC definitions
+cat <<EOF>jq_filter_pvc
+del(.status, .metadata.annotations, .metadata.creationTimestamp,
+.metadata.finalizers, .metadata.uid, .metadata.resourceVersion,
+.metadata.ownerReferences)
+| .spec.accessModes[0] = "ReadWriteMany"
+EOF
+
+for ONLINEPVC in $ONLINEPVCS; do
+    oc get pvc $ONLINEPVC -o json > pvc_${ONLINEPVC}_old.json
+    oc get pvc $ONLINEPVC -o json | jq -f jq_filter_pvc > pvc_${ONLINEPVC}_new.json
+    PVCS+=($ONLINEPVC)
+    # Retrieve PV for PVC
+    ONLINEPV=$(oc get pvc $ONLINEPVC -o jsonpath='{.spec.volumeName}')
+    oc get pv $ONLINEPV -o json > pv_${ONLINEPV}_old.json
+    PVS+=($ONLINEPV)
+    # Get original reclaim policy
+    RECLAIMPOLICIES+=($(oc get pv $ONLINEPV -o jsonpath='{.spec.persistentVolumeReclaimPolicy}'))
+
+    echo "Patching online added PVs to Retain mode"
+    # Ensure that the PV will be retained after PVC deletion
+    oc patch pv $ONLINEPV --type=merge -p '{"spec": {"persistentVolumeReclaimPolicy": "Retain"}}'
+done
+
+echo "Deleting VM"
 # Deleting VM will also delete DataVolume and PVC
 oc delete vm $VM
 
+echo "Patching PVs to RWX and remove PVC UIDs to that they become Available"
 for PV in ${PVS[@]}; do
     # (optional verification) Check that PV status is "Released"
-    #oc get pv $PV -o jsonpath='{.status.phase}{"\n"}'
+    oc get pv $PV -o jsonpath='{.metadata.name}{" "}{.status.phase}{"\n"}'
 
     # Cleanup PV uid reference that prevents PV reclamation
     oc patch pv $PV --type='json' -p='[{"op": "remove", "path": "/spec/claimRef/uid"}]'
 
     # (optional verification) Check that status is "Available"
-    #oc get pv $PV -o jsonpath='{.status.phase}{"\n"}'
+    oc get pv $PV -o jsonpath='{.metadata.name}{" "}{.status.phase}{"\n"}'
 
     # Change PV access mode to RWX
     oc patch pv $PV --type='json' -p='[{"op": "replace", "path": "/spec/accessModes/0", "value": "ReadWriteMany"}]'
 done
 
+echo "Re-creating the DataVolumes"
 # Re-create the DataVolumes, this will re-create the PVC as well
 for DV in $DATAVOLUMES; do
     oc apply -f dv_${DV}_new.json
 done
 
+echo "Re-creating the online added PVCs"
+for ONLINEPVC in $ONLINEPVCS; do
+    oc apply -f pvc_${ONLINEPVC}_new.json
+done
+
+echo "Waiting for the PVCs to get bound"
 for PVC in ${PVCS[@]}; do
     wait_for_pvc_bound $PVC
 done
 
+echo "Re-applying the original reclaim policy"
 i=0
 # Re-apply the original reclaim policy if required
 for PV in ${PVS[@]}; do
@@ -210,5 +242,6 @@ for PV in ${PVS[@]}; do
     ((i++))
 done
 
+echo "Re-creating the Virtual machine"
 # Re-create Virtual machine
 oc apply -f vm_${VM}_new.json

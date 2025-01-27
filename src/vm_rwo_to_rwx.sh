@@ -99,13 +99,9 @@ del(.status, .metadata.annotations, .metadata.creationTimestamp,
 EOF
 
 # jq filter, second step: patch all Datavolume entries to RWX
-i=0
-for DV in $DATAVOLUMES; do
-    cat <<EOF>>jq_filter_vm
-| .spec.dataVolumeTemplates[$i].spec.storage.accessModes[0] = "ReadWriteMany"
+cat <<EOF>>jq_filter_vm
+| .spec.dataVolumeTemplates[].spec.storage.accessModes[0] = "ReadWriteMany"
 EOF
-    ((i++))
-done
 
 # jq filter, third step: deletion of macAddress from all interfaces
 cat <<EOF>>jq_filter_vm
